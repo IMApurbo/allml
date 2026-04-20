@@ -1,4 +1,4 @@
-# allml.py — v1.0.2 (nu_svc fix + no emojis)
+# allml.py — v1.0.2 
 
 import os
 import sys
