@@ -1,21 +1,22 @@
 # AllML — All-in-One Machine Learning Library
 
-> **One import to rule them all.**
-> Load a CSV, pick your columns, choose a method, train, predict. Done.
+> One import to rule them all.
+> Load a CSV, engineer your features, pick your columns, choose a method, train, predict. Done.
 
 ```python
 from allml import AllML
 
-ml = AllML("data.csv")
+ml = AllML("your_data.csv")
 ml.col_to_feed(["feature1", "feature2", "feature3"])
 ml.col_to_pred(["target"])
-ml.method("random_forest_classifier")
+ml.method("random_forest_regressor")
 ml.split(70, 20, 10)
-ml.train(n_estimators=100)
+ml.train(n_estimators=200)
 ml.show()
 ml.save("models/my_model")
 
-result = ml.pred(5.1, 3.2, 1.4)
+result = ml.pred(...)
+print(result)
 ```
 
 ---
@@ -23,78 +24,220 @@ result = ml.pred(5.1, 3.2, 1.4)
 ## What is AllML?
 
 AllML is a unified machine learning interface that wraps every major
-scikit-learn algorithm (plus XGBoost, LightGBM, CatBoost when installed)
+scikit-learn algorithm — plus XGBoost, LightGBM, and CatBoost when installed —
 behind a single consistent API.
 
 No boilerplate. No manual preprocessing. No separate scalers, encoders,
 or train/test split code. You give it a CSV file and tell it what to do.
-AllML handles the rest.
+AllML handles everything else automatically.
+
+- String and categorical columns are encoded automatically
+- Raw string values can be passed directly into `ml.pred()`
+- Missing values are reported on load and handled with one line
+- Saving a model bundles everything needed to predict later — no CSV required at inference time
 
 It automatically detects whether your task is:
 
-- Regression (predicting a number)
-- Binary classification (predicting 0 or 1)
-- Multi-class classification (predicting one of many categories)
-- Multi-output regression (predicting several numbers at once)
-- Multi-output classification (predicting several categories at once)
+- **Regression** — predicting a decimal number
+- **Binary Classification** — predicting 0 or 1
+- **Multi-class Classification** — predicting one of many categories
+- **Multi-Output Regression** — predicting several numbers at once
+- **Multi-Output Classification** — predicting several categories at once
 
 ---
 
 ## Installation
 
 ```bash
-pip install numpy pandas scikit-learn matplotlib seaborn
+pip install allml
 ```
 
-Optional boosting libraries (recommended):
+Optional boosting libraries for extra algorithms:
 
 ```bash
 pip install xgboost lightgbm catboost
-```
-
-Then drop `allml.py` into your project folder.
-
----
-
-## Quick Start
-
-```python
-from allml import AllML
-
-ml = AllML("house_prices.csv")
-ml.col_to_feed(["area_sqft", "bedrooms", "bathrooms", "year_built"])
-ml.col_to_pred(["price_usd"])
-ml.method("random_forest_regressor")
-ml.split(70, 20, 10)
-ml.train(n_estimators=150)
-ml.show()
-ml.show_graph("all")
-ml.save("models/house_model")
-
-price = ml.pred(2000, 3, 2, 2010)
-print(f"Predicted price: ${price:,.2f}")
 ```
 
 ---
 
 ## API Reference
 
-### `AllML(csv_filepath)`
+### `AllML(csv_filepath=None)`
 
-Load your dataset. This is always the first step.
+Load your dataset. Providing a CSV is required for training.
+For loading a saved model and predicting, no CSV is needed.
 
 ```python
-ml = AllML("data.csv")
+# Training mode — CSV required
+ml = AllML("your_data.csv")
+
+# Inference mode — no CSV needed
+ml = AllML()
+ml.load("models/my_model.allml")
+```
+
+When a CSV is loaded, AllML automatically reports how many
+missing values exist and which columns are affected.
+
+---
+
+### `ml.engineer`
+
+Feature engineering module attached to every AllML instance.
+All operations are applied directly to the loaded DataFrame
+and logged so you can inspect every step with `ml.engineer.report()`.
+
+#### Fill Missing Values
+
+```python
+ml.engineer.fill_missing("column_name", strategy="mean")
+ml.engineer.fill_missing("column_name", strategy="median")
+ml.engineer.fill_missing("column_name", strategy="constant", fill_value=0)
+ml.engineer.fill_missing(strategy="mode")           # all columns
+ml.engineer.fill_missing(strategy="ffill")          # forward fill
+ml.engineer.fill_missing(strategy="bfill")          # backward fill
+ml.engineer.fill_missing(strategy="knn", knn_neighbors=5)
+ml.engineer.fill_missing(strategy="iterative")      # MICE imputation
+```
+
+| Strategy | Description |
+|---|---|
+| `mean` | Replace with column mean |
+| `median` | Replace with column median |
+| `mode` | Replace with most frequent value |
+| `constant` | Replace with a fixed value |
+| `ffill` | Forward fill from the previous row |
+| `bfill` | Backward fill from the next row |
+| `knn` | K-Nearest Neighbours imputation |
+| `iterative` | MICE iterative imputation |
+
+#### Drop Columns and Rows
+
+```python
+ml.engineer.drop_columns(["col1", "col2"])
+ml.engineer.drop_duplicates()
+ml.engineer.drop_duplicates(subset=["id_column"])
+ml.engineer.drop_missing_rows()
+ml.engineer.drop_missing_rows(columns=["col1", "col2"])
+ml.engineer.drop_missing_rows(threshold=0.5)
+```
+
+#### Encode Categorical Columns
+
+```python
+ml.engineer.encode("column_name", method="label")
+ml.engineer.encode(["col1", "col2"], method="onehot")
+ml.engineer.encode("column_name", method="ordinal",
+                   categories=["low", "medium", "high"])
+ml.engineer.encode("column_name", method="binary")
+```
+
+| Method | Description |
+|---|---|
+| `label` | Integer label encoding — 0, 1, 2, ... |
+| `onehot` | One-hot encoding — creates new columns |
+| `ordinal` | Ordered integer encoding using a provided category list |
+| `binary` | Maps exactly 2 unique values to 0 and 1 |
+
+> **Note:** You do not need to manually encode columns before training.
+> AllML encodes all string columns in `col_to_feed()` and `col_to_pred()`
+> automatically at train time and applies the same encoding at predict time.
+> Use `ml.engineer.encode()` only when you want explicit control over
+> how a column is encoded.
+
+#### Scale and Normalise
+
+```python
+ml.engineer.scale("column_name", method="standard")
+ml.engineer.scale("column_name", method="minmax")
+ml.engineer.scale("column_name", method="robust")
+ml.engineer.scale("column_name", method="log")
+ml.engineer.scale("column_name", method="sqrt")
+ml.engineer.scale(["col1", "col2"], method="standard")
+```
+
+| Method | Description |
+|---|---|
+| `standard` | Zero mean, unit variance — z-score |
+| `minmax` | Scale to range [0, 1] |
+| `robust` | Scale using median and IQR — resistant to outliers |
+| `log` | Natural log transform — log(x + 1) |
+| `sqrt` | Square root transform |
+
+#### Handle Outliers
+
+```python
+ml.engineer.clip_outliers("column_name", method="iqr", factor=1.5)
+ml.engineer.clip_outliers("column_name", method="zscore", z_threshold=3.0)
+ml.engineer.clip_outliers(["col1", "col2"], method="iqr")
+```
+
+| Method | Description |
+|---|---|
+| `iqr` | Clip values outside Q1 - factor * IQR and Q3 + factor * IQR |
+| `zscore` | Clip values where the absolute z-score exceeds the threshold |
+
+#### Create New Features
+
+```python
+# Polynomial features
+ml.engineer.polynomial("column_name", degree=2)
+ml.engineer.polynomial(["col1", "col2"], degree=3)
+
+# Interaction feature — multiplies two columns together
+ml.engineer.interaction("col_a", "col_b")
+ml.engineer.interaction("col_a", "col_b", new_name="custom_name")
+
+# Bin a continuous column into discrete intervals
+ml.engineer.bin("column_name", bins=5)
+ml.engineer.bin("column_name", bins=[0, 100, 500, 1000],
+                labels=["Low", "Medium", "High"])
+
+# Extract features from a datetime column
+ml.engineer.datetime_features("datetime_column")
+ml.engineer.datetime_features("datetime_column",
+                               features=["year", "month", "dayofweek"])
+
+# Apply a custom function to a column
+ml.engineer.transform("column_name", lambda x: x / 1000,
+                       new_name="new_column_name")
+
+# Rename columns
+ml.engineer.rename({"old_name": "new_name"})
+```
+
+#### Inspect and Visualise
+
+```python
+ml.engineer.report()
+ml.engineer.plot_missing()
+ml.engineer.plot_distribution("column_name")
+ml.engineer.plot_distribution(["col1", "col2", "col3"])
+```
+
+#### Chaining
+
+All engineer operations return `self` so they can be chained:
+
+```python
+(ml.engineer
+   .fill_missing("column_name", strategy="mean")
+   .drop_duplicates()
+   .clip_outliers("column_name", method="iqr")
+   .encode("column_name", method="label")
+   .scale("column_name", method="minmax")
+   .report())
 ```
 
 ---
 
 ### `ml.col_to_feed(columns)`
 
-Set the input feature columns. Pass a list of column names.
+Set the input feature columns. String and categorical columns
+are accepted without any manual encoding.
 
 ```python
-ml.col_to_feed(["age", "income", "credit_score"])
+ml.col_to_feed(["col1", "col2", "col3"])
 ```
 
 ---
@@ -102,24 +245,22 @@ ml.col_to_feed(["age", "income", "credit_score"])
 ### `ml.col_to_pred(columns)`
 
 Set the target column(s) to predict.
-Pass a single column for standard tasks,
-or multiple columns for multi-output tasks.
 
 ```python
 # Single target
-ml.col_to_pred(["price"])
+ml.col_to_pred(["target_column"])
 
 # Multiple targets
-ml.col_to_pred(["temperature", "humidity", "rainfall"])
+ml.col_to_pred(["target1", "target2", "target3"])
 ```
 
-AllML automatically detects the task type from the target column:
+AllML detects the task type automatically:
 
-| Target column type | Task detected |
+| Target column content | Task detected |
 |---|---|
 | Float values | Regression |
-| 2 unique integer values | Binary Classification |
-| 3+ unique integer / string values | Multi-class Classification |
+| 2 unique values | Binary Classification |
+| 3 or more unique values | Multi-class Classification |
 | Multiple float columns | Multi-Output Regression |
 | Multiple category columns | Multi-Output Classification |
 
@@ -131,14 +272,17 @@ Choose which algorithm(s) to use.
 
 ```python
 # Single method
-ml.method("random_forest_classifier")
+ml.method("method_name")
 
-# Multiple methods
-ml.method(["logistic_regression", "svc", "gradient_boosting_classifier"])
+# Multiple methods trained and compared together
+ml.method(["method1", "method2", "method3"])
 
-# All applicable methods for your task type
+# Every applicable method for your task type
 ml.method("all")
 ```
+
+If you select a method that does not match your task type, AllML skips it
+with a clear explanation and suggests the correct alternatives.
 
 #### All Available Methods
 
@@ -153,10 +297,10 @@ ml.method("all")
 | `bayesian_ridge` | Bayesian Ridge |
 | `sgd_regressor` | SGD Regressor |
 | `huber_regressor` | Huber Regressor |
-| `ransac_regressor` | RANSAC Regressor |
-| `theilsen_regressor` | Theil-Sen Regressor |
+| `ransac_regressor` | RANSAC |
+| `theilsen_regressor` | Theil-Sen |
 | `ard_regression` | ARD Regression |
-| `passive_aggressive_regressor` | Passive Aggressive Regressor |
+| `passive_aggressive_regressor` | Passive Aggressive |
 | `decision_tree_regressor` | Decision Tree |
 | `extra_tree_regressor` | Extra Tree |
 | `random_forest_regressor` | Random Forest |
@@ -196,7 +340,7 @@ ml.method("all")
 | `bagging_classifier` | Bagging |
 | `svc` | Support Vector Machine |
 | `linear_svc` | Linear SVC |
-| `nu_svc` | Nu SVC (auto-tunes nu) |
+| `nu_svc` | Nu SVC |
 | `knn_classifier` | K-Nearest Neighbors |
 | `gaussian_nb` | Gaussian Naive Bayes |
 | `bernoulli_nb` | Bernoulli Naive Bayes |
@@ -220,10 +364,7 @@ ml.method("all")
 | `birch` | BIRCH |
 | `mini_batch_kmeans` | Mini-Batch K-Means |
 
-`*` Only available if the optional library is installed.
-
-If you select a method that does not match your task type,
-AllML will skip it with an explanation and suggest correct alternatives.
+`*` Requires the optional library to be installed.
 
 ---
 
@@ -233,11 +374,8 @@ Split your data into training, test, and optional validation sets.
 Percentages must sum to 100.
 
 ```python
-# 80% train, 20% test
-ml.split(80, 20)
-
-# 70% train, 20% test, 10% validation
-ml.split(70, 20, 10)
+ml.split(train_pct, test_pct)
+ml.split(train_pct, test_pct, val_pct)
 ```
 
 ---
@@ -245,43 +383,43 @@ ml.split(70, 20, 10)
 ### `ml.train(...)`
 
 Train the selected model(s). All parameters are optional
-and will be applied where applicable.
+and are applied to every model where they are applicable.
 
 ```python
 ml.train(
-    epochs         = 100,    # max iterations for iterative models
-    learning_rate  = 0.01,   # step size for gradient-based models
-    n_estimators   = 100,    # trees for ensemble models
-    max_depth      = None,   # max tree depth (None = unlimited)
-    n_neighbors    = 5,      # k for KNN
-    kernel         = "rbf",  # kernel for SVM  ("rbf", "linear", "poly")
-    n_clusters     = 3,      # clusters for clustering models
-    alpha          = 1.0,    # regularisation strength
+    epochs         = 100,
+    learning_rate  = 0.01,
+    n_estimators   = 100,
+    max_depth      = None,
+    n_neighbors    = 5,
+    kernel         = "rbf",
+    n_clusters     = 3,
+    alpha          = 1.0,
 )
 ```
 
-AllML maps each parameter to the correct argument name for every model.
-You do not need to worry about which model uses which parameter name.
+| Parameter | Applies to |
+|---|---|
+| `epochs` | Iterative models — max iterations |
+| `learning_rate` | Gradient-based models |
+| `n_estimators` | Ensemble models — number of trees |
+| `max_depth` | Tree-based models |
+| `n_neighbors` | KNN models |
+| `kernel` | SVM models — `"rbf"`, `"linear"`, `"poly"` |
+| `n_clusters` | Clustering models |
+| `alpha` | Regularised linear models |
 
 ---
 
 ### `ml.show()`
 
-Print a detailed summary of the model, data splits, training config,
-and all performance metrics.
+Print a complete summary including dataset info, data splits,
+training configuration, all performance metrics, missing value
+report, and the full list of feature engineering steps applied.
 
 ```python
 ml.show()
 ```
-
-Output includes:
-
-- Dataset file, shape, feature and target columns
-- Detected task type
-- Train / test / validation sample counts
-- All training hyperparameters
-- Per-model metrics (accuracy, R2, RMSE, F1, confusion matrix, etc.)
-- Missing value report
 
 ---
 
@@ -290,62 +428,56 @@ Output includes:
 Plot one, several, or all available graphs.
 
 ```python
-# Single graph
-ml.show_graph("confusion_matrix")
-
-# Multiple graphs
-ml.show_graph(["roc_curve", "feature_importance", "model_comparison"])
-
-# Every applicable graph
+ml.show_graph("graph_name")
+ml.show_graph(["graph1", "graph2", "graph3"])
 ml.show_graph("all")
 ```
 
-#### Available Graphs
-
-| Graph | Task |
+| Graph | Best for |
 |---|---|
 | `confusion_matrix` | Classification |
 | `roc_curve` | Binary Classification |
 | `precision_recall_curve` | Binary Classification |
-| `feature_importance` | Tree & linear models |
-| `learning_curve` | All |
+| `feature_importance` | Tree and linear models |
+| `learning_curve` | All tasks |
 | `residuals` | Regression |
 | `prediction_vs_actual` | Regression |
 | `error_distribution` | Regression |
-| `model_comparison` | All (bar chart of main metric) |
-| `correlation_heatmap` | All |
-| `distribution` | All |
-| `boxplot` | All |
-| `pairplot` | All |
+| `model_comparison` | All tasks — bar chart of the main metric |
+| `correlation_heatmap` | All tasks |
+| `distribution` | All tasks |
+| `boxplot` | All tasks |
+| `pairplot` | All tasks |
 | `cluster_plot` | Clustering |
 
 ---
 
 ### `ml.save(path)`
 
-Save the trained model(s) to disk.
+Save trained model(s) to disk.
 
 ```python
-ml.save("models/my_model")
+ml.save("path/to/model_name")
 ```
 
-- Single method  → saves `my_model.allml`
-- Multiple methods → saves `my_model_<method_name>.allml` for each
-- Always saves `my_model_meta.json` with a human-readable summary
+- Single method → `model_name.allml`
+- Multiple methods → `model_name_<method>.allml` for each model
+- Always writes `model_name_meta.json` — a human-readable summary
 
-The `.allml` file bundles the trained model, fitted scaler,
-label encoders, and all metadata needed to predict later.
+Each `.allml` file bundles everything needed to make predictions later:
+the trained model, fitted scalers, label encoders for all string columns,
+column names, task type, metrics, and hyperparameters.
 
 ---
 
 ### `ml.load(path)`
 
-Load a previously saved model. After loading, `ml.pred()` works
-immediately without any other setup.
+Load a previously saved model. No CSV required.
+After loading, `ml.pred()` works immediately.
 
 ```python
-ml.load("models/my_model.allml")
-result = ml.pred(5.1, 3.2, 1.4)
+ml = AllML()
+ml.load("path/to/model_name.allml")
 ```
 
 ---
@@ -353,19 +485,11 @@ result = ml.pred(5.1, 3.2, 1.4)
 ### `ml.pred(*values)`
 
 Run a prediction. Pass values in the same order as `col_to_feed()`.
+String values are accepted directly for categorical columns.
 
 ```python
-# Regression
-price = ml.pred(2000, 3, 2, 2010)
-
-# Classification
-label = ml.pred(6.5, 85.0, 72.0, 7.5)
-
-# Multi-output (returns list)
-temp, humidity, rain = ml.pred(7, 200, 65.0, 1013.0, 15.0, 40.0, 100.0)
-
-# Predict using a specific method when multiple were trained
-price = ml.pred(2000, 3, 2, 2010, method="ridge")
+result = ml.pred(val1, val2, val3, ...)
+result = ml.pred(val1, val2, val3, ..., method="method_name")
 ```
 
 When multiple models are trained, `ml.pred()` returns a dictionary
@@ -373,37 +497,47 @@ mapping each method name to its prediction.
 
 ---
 
-## Task Examples
+## Examples
 
-### Regression — Predict a number
+### Regression — Predict a house price
 
 ```python
 from allml import AllML
 
-ml = AllML("employee_salary.csv")
-ml.col_to_feed(["age", "years_experience", "education_level",
-                "performance_score", "certifications"])
-ml.col_to_pred(["annual_salary"])
+ml = AllML("house_prices.csv")
+
+ml.engineer.fill_missing(strategy="mean")
+ml.engineer.clip_outliers("price_usd", method="iqr")
+ml.engineer.report()
+
+ml.col_to_feed(["area_sqft", "bedrooms", "bathrooms",
+                "year_built", "garage_cars", "condition"])
+ml.col_to_pred(["price_usd"])
 ml.method("gradient_boosting_regressor")
 ml.split(70, 20, 10)
 ml.train(n_estimators=200, learning_rate=0.05)
 ml.show()
 ml.show_graph(["prediction_vs_actual", "feature_importance",
                "residuals", "model_comparison"])
-ml.save("models/salary_model")
+ml.save("models/house_model")
 
-salary = ml.pred(35, 10, 3, 4, 2)
-print(f"Predicted salary: ${salary:,.0f}")
+price = ml.pred(1360, 2, 1, 1981, 1, "Excellent")
+print(f"Predicted price: ${price:,.2f}")
 ```
 
 ---
 
-### Binary Classification — Predict 0 or 1
+### Binary Classification — Predict heart disease risk
 
 ```python
 from allml import AllML
 
 ml = AllML("heart_disease.csv")
+
+ml.engineer.fill_missing(strategy="median")
+ml.engineer.clip_outliers(["cholesterol", "blood_pressure"])
+ml.engineer.report()
+
 ml.col_to_feed(["age", "sex", "cholesterol", "blood_pressure",
                 "max_heart_rate", "smoking"])
 ml.col_to_pred(["heart_disease"])
@@ -418,17 +552,18 @@ ml.show_graph(["confusion_matrix", "roc_curve",
 ml.save("models/heart_model")
 
 result = ml.pred(55, 1, 230, 140, 150, 1)
-print(f"Heart disease risk: {'High' if result == 1 else 'Low'}")
+print(f"Heart disease: {'High risk' if result == 1 else 'Low risk'}")
 ```
 
 ---
 
-### Multi-class Classification — Predict a category
+### Multi-class Classification — Predict a flower species
 
 ```python
 from allml import AllML
 
 ml = AllML("flower_species.csv")
+
 ml.col_to_feed(["sepal_length_cm", "sepal_width_cm",
                 "petal_length_cm", "petal_width_cm"])
 ml.col_to_pred(["species"])
@@ -446,12 +581,15 @@ print(f"Predicted species: {species}")
 
 ---
 
-### Multi-Output Regression — Predict several numbers
+### Multi-Output Regression — Predict weather conditions
 
 ```python
 from allml import AllML
 
 ml = AllML("weather_forecast.csv")
+
+ml.engineer.fill_missing(strategy="mean")
+
 ml.col_to_feed(["month", "day_of_year", "humidity_pct",
                 "pressure_hpa", "wind_speed_kmh",
                 "cloud_cover_pct", "altitude_m"])
@@ -471,73 +609,106 @@ print(f"Rainfall    : {rain:.1f} mm")
 
 ---
 
-### Train All Methods and Compare
+### Compare All Methods — Loan approval
 
 ```python
 from allml import AllML
 
 ml = AllML("loan_approval.csv")
+
+ml.engineer.fill_missing(strategy="median")
+ml.engineer.clip_outliers("annual_income", method="iqr")
+
 ml.col_to_feed(["annual_income", "loan_amount", "credit_score",
-                "employment_years", "existing_debt_pct"])
+                "employment_years", "existing_debt_pct", "loan_purpose"])
 ml.col_to_pred(["approved"])
-ml.method("all")          # trains every classification algorithm
+ml.method("all")
 ml.split(70, 20, 10)
 ml.train(n_estimators=50, epochs=100)
 ml.show()
-ml.show_graph("model_comparison")   # bar chart of all model accuracies
-ml.save("models/loan_all")          # saves one file per trained model
+ml.show_graph("model_comparison")
+ml.save("models/loan_all")
 ```
 
 ---
 
-### Load and Predict (No Training Required)
+### Load and Predict — No CSV Required
 
 ```python
 from allml import AllML
 
-ml = AllML("any_file.csv")     # CSV required for initialisation only
-ml.load("models/salary_model.allml")
+ml = AllML()
+ml.load("models/house_model.allml")
 
-salary = ml.pred(40, 15, 4, 5, 3)
-print(f"Salary: ${salary:,.0f}")
+price = ml.pred(1360, 2, 1, 1981, 1, "Excellent")
+print(f"Price: ${price:,.2f}")
 ```
 
 ---
 
 ### Chained API
 
-Every method returns `self`, so calls can be chained.
-
 ```python
 from allml import AllML
 
-result = (
-    AllML("data.csv")
-        .col_to_feed(["f1", "f2", "f3"])
-        .col_to_pred(["target"])
-        .method("random_forest_regressor")
-        .split(80, 20)
-        .train(n_estimators=100)
-)
-result.show()
+ml = AllML("your_data.csv")
+
+(ml.engineer
+   .fill_missing(strategy="mean")
+   .drop_duplicates()
+   .clip_outliers("target_column", method="iqr")
+   .encode("category_column", method="label")
+   .report())
+
+(ml
+   .col_to_feed(["col1", "col2", "col3", "category_column"])
+   .col_to_pred(["target_column"])
+   .method("random_forest_regressor")
+   .split(70, 20, 10)
+   .train(n_estimators=100))
+
+ml.show()
+ml.show_graph("all")
+ml.save("models/my_model")
 ```
+
+---
+
+## How String Columns Work
+
+AllML fully supports string and categorical values in both
+feature columns and prediction inputs — no manual encoding required.
+
+**At training time** — AllML detects non-numeric columns and fits a
+label encoder on each one automatically.
+
+**At prediction time** — the same encoder is applied so raw string
+values like `"Excellent"` or `"Engineering"` are converted correctly.
+
+**At save and load time** — all encoders are bundled inside the `.allml`
+file so they are always available when you load and predict.
+
+The only restriction is that a value passed to `ml.pred()` must have
+been present in the training data. Passing an unseen value raises a
+clear error showing the valid options.
 
 ---
 
 ## Automatic Behaviours
 
-These things happen without any extra code from you.
-
 | Behaviour | Details |
 |---|---|
-| Task detection | Inferred from the target column type and unique value count |
-| Categorical encoding | String columns are label-encoded automatically |
+| Task detection | Inferred from target column type and unique value count |
+| String column encoding | All non-numeric columns are encoded automatically |
+| String pred inputs | Raw strings can be passed directly to `ml.pred()` |
+| Encoder persistence | Label encoders are saved inside `.allml` files and restored on load |
 | Feature scaling | All features are standardised before training |
 | Target scaling | Regression targets are scaled and inverse-transformed for predictions |
-| Multi-output wrapping | Models are wrapped in `MultiOutputRegressor` or `MultiOutputClassifier` as needed |
-| Wrong method warning | If you pick a classifier for a regression task, AllML warns you and suggests alternatives |
-| NuSVC auto-tuning | The `nu` parameter is computed from your class distribution so it is always feasible |
-| Parameter mapping | `learning_rate`, `alpha`, `kernel`, etc. are mapped to the correct argument for each model |
+| Multi-output wrapping | Models are wrapped in MultiOutputRegressor or MultiOutputClassifier as needed |
+| Wrong method warning | Picking a classifier for a regression task is caught with a suggestion |
+| NuSVC auto-tuning | `nu` is computed from the class distribution — always feasible |
+| Parameter mapping | All hyperparameters are mapped to the correct internal argument per model |
+| Missing value warning | AllML reports missing value counts and affected columns on CSV load |
 
 ---
 
@@ -551,29 +722,17 @@ These things happen without any extra code from you.
 
 ---
 
-## File Format
-
-Saved models use the `.allml` extension.
-Each file is a Python pickle bundle containing:
-
-- The trained model object
-- The fitted `StandardScaler` for features
-- The fitted `StandardScaler` for targets (regression)
-- All label encoders for categorical columns
-- Metadata (column names, task type, metrics, hyperparameters)
-
-A companion `_meta.json` file is also written with human-readable info.
+## Saved File Structure
 
 ```
 models/
-  salary_model.allml          # single model bundle
-  salary_model_meta.json      # human-readable summary
+  my_model.allml                              # single model bundle
+  my_model_meta.json                          # human-readable summary
 
-  loan_all_random_forest_classifier.allml
-  loan_all_gradient_boosting_classifier.allml
-  loan_all_logistic_regression.allml
-  ...
-  loan_all_meta.json
+  my_model_random_forest_classifier.allml     # one file per method
+  my_model_gradient_boosting_classifier.allml
+  my_model_logistic_regression.allml
+  my_model_meta.json
 ```
 
 ---
@@ -582,10 +741,11 @@ models/
 
 - `isotonic_regression` requires exactly one feature column.
 - `pls_regression` automatically caps `n_components` to the number of features.
-- `nu_svc` and `nu_svr` automatically select a feasible `nu` value.
+- `nu_svc` and `nu_svr` automatically select a feasible `nu` value based on training data.
 - `gaussian_process_regressor` and `gaussian_process_classifier` can be slow on large datasets.
-- The `kernel` parameter applies to SVM models only. Gaussian Process models use their own internal kernel.
-- Categorical feature columns and target columns are encoded automatically. You do not need to pre-process them.
+- The `kernel` parameter applies to SVM models only.
+- String values in `ml.pred()` must match values seen during training.
+- Calling `col_to_feed()`, `col_to_pred()`, or `split()` without a CSV raises a clear error with instructions.
 
 ---
 
@@ -598,9 +758,10 @@ MIT License. Free to use, modify, and distribute.
 ## Contributing
 
 Pull requests are welcome.
-If a model produces unexpected errors or a parameter is not being
-mapped correctly, please open an issue with the method name,
-dataset shape, and the full error message.
+If a model produces unexpected errors or a parameter is not mapped
+correctly, open an issue with the method name, dataset shape,
+and the full error message.
+---
 
 ## Author
 **IMApurbo**  
